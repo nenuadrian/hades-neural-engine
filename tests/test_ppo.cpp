@@ -53,24 +53,26 @@ TEST(PPOTest, DiscreteUpdate) {
     RolloutBuffer buffer(buf_config);
 
     // Fill buffer with random data
-    torch::NoGradGuard no_grad;
-    for (int i = 0; i < 32; i++) {
-        auto obs_t = torch::randn({1, 4});
-        auto out = policy->forward(obs_t);
-        auto probs = torch::softmax(out.action_logits, 1);
-        auto action = probs.multinomial(1).squeeze(1);
-        auto log_probs = torch::log_softmax(out.action_logits, 1);
-        auto log_prob = log_probs.gather(1, action.unsqueeze(0).unsqueeze(1)).squeeze();
+    {
+        torch::NoGradGuard no_grad;
+        for (int i = 0; i < 32; i++) {
+            auto obs_t = torch::randn({1, 4});
+            auto out = policy->forward(obs_t);
+            auto probs = torch::softmax(out.action_logits, 1);
+            auto action = probs.multinomial(1).squeeze(1);
+            auto log_probs = torch::log_softmax(out.action_logits, 1);
+            auto log_prob = log_probs.gather(1, action.unsqueeze(1)).squeeze();
 
-        Tensor obs = Tensor::from_flat({
-            obs_t[0][0].item<float>(),
-            obs_t[0][1].item<float>(),
-            obs_t[0][2].item<float>(),
-            obs_t[0][3].item<float>()
-        });
+            Tensor obs = Tensor::from_flat({
+                obs_t[0][0].item<float>(),
+                obs_t[0][1].item<float>(),
+                obs_t[0][2].item<float>(),
+                obs_t[0][3].item<float>()
+            });
 
-        buffer.add(obs, Action::discrete(action.item<int>()),
-                   1.0f, (i == 31), out.value.item<float>(), log_prob.item<float>());
+            buffer.add(obs, Action::discrete(action.item<int>()),
+                       1.0f, (i == 31), out.value.item<float>(), log_prob.item<float>());
+        }
     }
 
     buffer.compute_returns_and_advantages({0.0f});

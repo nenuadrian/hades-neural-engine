@@ -99,19 +99,22 @@ void Trainer::train_async() {
     if (state_ != State::Idle && state_ != State::Finished && state_ != State::Error) {
         return;
     }
-    stop_source_ = std::stop_source{};
-    training_thread_ = std::jthread([this](std::stop_token st) {
-        training_loop(std::move(st));
+    stop_requested_ = false;
+    if (training_thread_.joinable()) {
+        training_thread_.join();
+    }
+    training_thread_ = std::thread([this]() {
+        training_loop();
     });
 }
 
 void Trainer::train() {
-    stop_source_ = std::stop_source{};
-    training_loop(stop_source_.get_token());
+    stop_requested_ = false;
+    training_loop();
 }
 
 void Trainer::request_stop() {
-    stop_source_.request_stop();
+    stop_requested_ = true;
 }
 
 void Trainer::pause() {
@@ -133,7 +136,7 @@ TrainingMetrics Trainer::latest_metrics() const {
     return latest_metrics_;
 }
 
-void Trainer::training_loop(std::stop_token stop_token) {
+void Trainer::training_loop() {
     try {
         state_ = State::Running;
 
@@ -177,21 +180,21 @@ void Trainer::training_loop(std::stop_token stop_token) {
         auto observations = envs_->reset_all(config_.seed);
 
         // Training loop
-        while (!stop_token.stop_requested() &&
+        while (!stop_requested_ &&
                total_timesteps_ < config_.total_timesteps) {
 
             // Pause handling
-            while (pause_requested_ && !stop_token.stop_requested()) {
+            while (pause_requested_ && !stop_requested_) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
-            if (stop_token.stop_requested()) break;
+            if (stop_requested_) break;
 
             for (auto& cb : callbacks_) cb->on_rollout_start(*this);
             buffer_->reset();
 
             // Collect rollout
             for (int32_t step = 0; step < config_.rollout_length; step++) {
-                if (stop_token.stop_requested()) break;
+                if (stop_requested_) break;
 
                 // Stack observations into a batch tensor
                 std::vector<float> obs_batch;
@@ -286,7 +289,7 @@ void Trainer::training_loop(std::stop_token stop_token) {
                 for (auto& cb : callbacks_) cb->on_step(*this, total_timesteps_);
             }
 
-            if (stop_token.stop_requested()) break;
+            if (stop_requested_) break;
 
             // Compute last values for GAE bootstrap
             std::vector<float> last_values(config_.num_envs);

@@ -13,7 +13,6 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
-#include <stop_token>
 #include <thread>
 #include <vector>
 
@@ -66,8 +65,7 @@ public:
     bool export_policy(const std::string& path) const;
 
 private:
-    void training_loop(std::stop_token stop_token);
-    void collect_rollout(std::stop_token& stop_token);
+    void training_loop();
     void train_on_rollout();
     void run_evaluation();
 
@@ -79,8 +77,8 @@ private:
     VectorizedEnv::EnvFactory env_factory_;
     std::vector<std::shared_ptr<ITrainerCallback>> callbacks_;
 
-    std::jthread training_thread_;
-    std::stop_source stop_source_;
+    std::thread training_thread_;
+    std::atomic<bool> stop_requested_{false};
     std::atomic<State> state_{State::Idle};
     std::atomic<bool> pause_requested_{false};
     std::atomic<int32_t> current_iteration_{0};

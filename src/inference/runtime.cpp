@@ -1,13 +1,63 @@
 #include <hne/inference/runtime.hpp>
 
-#include <torch/script.h>
+#include <torch/torch.h>
 #include <iostream>
+#include <numeric>
 #include <stdexcept>
 
 namespace hne {
 
+namespace {
+
+class NativeInferencePolicy : public torch::nn::Module {
+public:
+    NativeInferencePolicy(int32_t obs_size,
+                          const std::vector<int32_t>& hidden_sizes,
+                          const SpaceSpec& act_space)
+        : continuous_(std::holds_alternative<BoxSpace>(act_space)) {
+
+        shared_ = torch::nn::Sequential();
+        int32_t in_size = obs_size;
+        for (int32_t hidden_size : hidden_sizes) {
+            shared_->push_back(torch::nn::Linear(in_size, hidden_size));
+            shared_->push_back(torch::nn::Tanh());
+            in_size = hidden_size;
+        }
+        register_module("shared", shared_);
+
+        int32_t act_size = 0;
+        if (continuous_) {
+            const auto& box = std::get<BoxSpace>(act_space);
+            act_size = std::accumulate(box.shape.begin(), box.shape.end(),
+                                       int32_t{1}, std::multiplies<>());
+            log_std_ = register_parameter("log_std", torch::zeros({act_size}));
+        } else if (std::holds_alternative<DiscreteSpace>(act_space)) {
+            act_size = std::get<DiscreteSpace>(act_space).n;
+        } else {
+            const auto& mds = std::get<MultiDiscreteSpace>(act_space);
+            act_size = std::accumulate(mds.nvec.begin(), mds.nvec.end(), int32_t{0});
+        }
+
+        actor_head_ = torch::nn::Linear(in_size, act_size);
+        register_module("actor_head", actor_head_);
+    }
+
+    torch::Tensor forward(torch::Tensor observation) {
+        auto features = shared_->forward(observation);
+        return actor_head_->forward(features);
+    }
+
+private:
+    torch::nn::Sequential shared_{nullptr};
+    torch::nn::Linear actor_head_{nullptr};
+    torch::Tensor log_std_;
+    bool continuous_ = false;
+};
+
+} // namespace
+
 struct InferenceRuntime::Impl {
-    torch::jit::script::Module model;
+    std::shared_ptr<NativeInferencePolicy> model;
     bool loaded = false;
     SpaceSpec obs_space;
     SpaceSpec act_space;
@@ -20,29 +70,33 @@ InferenceRuntime::~InferenceRuntime() = default;
 
 bool InferenceRuntime::load(const std::string& path) {
     try {
-        impl_->model = torch::jit::load(path);
-        impl_->model.eval();
+        torch::serialize::InputArchive archive;
+        archive.load_from(path);
 
-        // Try to read embedded metadata
-        if (impl_->model.hasattr("hne_meta.json")) {
-            // Extra files from save()
+        torch::Tensor meta_tensor;
+        archive.read("meta.json", meta_tensor);
+        std::string meta_str(static_cast<char*>(meta_tensor.data_ptr()),
+                             meta_tensor.numel());
+        auto meta = nlohmann::json::parse(meta_str);
+        from_json(meta["obs_space"], impl_->obs_space);
+        from_json(meta["act_space"], impl_->act_space);
+        impl_->obs_size = meta.value("obs_size", 0);
+
+        std::vector<int32_t> hidden_sizes;
+        for (const auto& value : meta.value("hidden_sizes", nlohmann::json::array())) {
+            hidden_sizes.push_back(value.get<int32_t>());
         }
 
-        // Read extra files
-        std::unordered_map<std::string, std::string> extra;
-        extra["hne_meta.json"] = "";
+        impl_->model = std::make_shared<NativeInferencePolicy>(
+            impl_->obs_size, hidden_sizes, impl_->act_space);
 
-        // Re-load with extra files
-        impl_->model = torch::jit::load(path, torch::kCPU, extra);
-        impl_->model.eval();
-
-        auto& meta_str = extra["hne_meta.json"];
-        if (!meta_str.empty()) {
-            auto meta = nlohmann::json::parse(meta_str);
-            from_json(meta["obs_space"], impl_->obs_space);
-            from_json(meta["act_space"], impl_->act_space);
-            impl_->obs_size = meta.value("obs_size", 0);
+        for (auto& p : impl_->model->named_parameters()) {
+            torch::Tensor loaded;
+            archive.read(std::string("policy.") + p.key(), loaded);
+            p.value().data().copy_(loaded);
         }
+
+        impl_->model->eval();
 
         impl_->continuous = std::holds_alternative<BoxSpace>(impl_->act_space);
         impl_->loaded = true;
@@ -72,17 +126,7 @@ Action InferenceRuntime::evaluate(const Tensor& observation, bool deterministic)
         torch::kFloat32
     ).clone();
 
-    auto output = impl_->model.forward({obs_t});
-
-    // The traced model returns a tuple: (action_logits, value) or
-    // (action_logits, value, log_std) depending on the policy
-    torch::Tensor action_logits;
-    if (output.isTuple()) {
-        auto elements = output.toTuple()->elements();
-        action_logits = elements[0].toTensor();
-    } else {
-        action_logits = output.toTensor();
-    }
+    auto action_logits = impl_->model->forward(obs_t);
 
     if (impl_->continuous) {
         torch::Tensor action;
@@ -135,15 +179,7 @@ std::vector<Action> InferenceRuntime::evaluate_batch(
     auto obs_t = torch::from_blob(flat.data(), {batch_size, obs_dim},
                                    torch::kFloat32).clone();
 
-    auto output = impl_->model.forward({obs_t});
-
-    torch::Tensor action_logits;
-    if (output.isTuple()) {
-        auto elements = output.toTuple()->elements();
-        action_logits = elements[0].toTensor();
-    } else {
-        action_logits = output.toTensor();
-    }
+    auto action_logits = impl_->model->forward(obs_t);
 
     std::vector<Action> actions;
     actions.reserve(batch_size);

@@ -1,9 +1,9 @@
 #ifdef HNE_TRAINING
 
 #include <hne/training/checkpoint.hpp>
-#include <torch/script.h>
 #include <fstream>
 #include <iostream>
+#include <map>
 
 namespace hne::checkpoint {
 
@@ -87,18 +87,54 @@ bool export_policy(const std::string& path,
                    int32_t obs_size) {
     try {
         policy.eval();
-        auto example_input = torch::randn({1, obs_size});
-        auto traced = torch::jit::trace(policy, {example_input});
+        torch::serialize::OutputArchive archive;
 
-        // Store space specs as extra files
+        // Persist the parameters needed for native inference loading.
+        for (const auto& p : policy.named_parameters()) {
+            const auto& name = p.key();
+            if (name.rfind("shared.", 0) == 0 ||
+                name.rfind("actor_head.", 0) == 0 ||
+                name == "log_std") {
+                archive.write(std::string("policy.") + name, p.value());
+            }
+        }
+
+        // Store model and space metadata as JSON in a byte tensor.
         nlohmann::json meta;
         to_json(meta["obs_space"], obs_space);
         to_json(meta["act_space"], act_space);
         meta["obs_size"] = obs_size;
-        std::string meta_str = meta.dump();
+        meta["format"] = "hne_native_policy_v1";
 
-        // Save the traced module
-        traced.save(path, {{"hne_meta.json", meta_str}});
+        std::map<int32_t, int32_t> hidden_sizes;
+        for (const auto& p : policy.named_parameters()) {
+            const auto& name = p.key();
+            if (name.rfind("shared.", 0) != 0 || !name.ends_with(".weight")) {
+                continue;
+            }
+
+            const auto index_end = name.find('.', 7);
+            if (index_end == std::string::npos) {
+                continue;
+            }
+
+            const auto index_str = name.substr(7, index_end - 7);
+            hidden_sizes.emplace(std::stoi(index_str),
+                                 static_cast<int32_t>(p.value().size(0)));
+        }
+
+        meta["hidden_sizes"] = nlohmann::json::array();
+        for (const auto& [_, size] : hidden_sizes) {
+            meta["hidden_sizes"].push_back(size);
+        }
+
+        std::string meta_str = meta.dump();
+        auto meta_tensor = torch::zeros({static_cast<int64_t>(meta_str.size())},
+                                        torch::kByte);
+        std::memcpy(meta_tensor.data_ptr(), meta_str.data(), meta_str.size());
+        archive.write("meta.json", meta_tensor);
+
+        archive.save_to(path);
 
         policy.train();
         return true;
