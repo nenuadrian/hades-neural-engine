@@ -94,6 +94,19 @@ cmake --build build
 ctest --test-dir build
 ```
 
+## Documentation
+
+MkDocs Material documentation is configured in this repository and deployed through GitHub Pages from the `main` branch workflow in `.github/workflows/docs.yml`.
+
+To preview it locally:
+
+```bash
+python3 -m venv .venv-docs
+source .venv-docs/bin/activate
+pip install -r requirements-docs.txt
+mkdocs serve
+```
+
 ## Algorithms
 
 - **PPO** (Proximal Policy Optimization) with GAE, clipped surrogate loss, optional KL early stopping

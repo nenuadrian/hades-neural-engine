@@ -1,0 +1,52 @@
+site_name: Hades Neural Engine
+site_description: C++20 reinforcement learning library for training and deploying neural network policies in game engines.
+site_url: https://nenuadrian.github.io/hades-neural-engine/
+repo_url: https://github.com/nenuadrian/hades-neural-engine
+repo_name: nenuadrian/hades-neural-engine
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+  palette:
+    - scheme: default
+      primary: black
+      accent: deep orange
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+
+nav:
+  - Overview: index.md
+  - Getting Started: getting-started.md
+  - Architecture: architecture.md
+  - Training: training.md
+  - Inference: inference.md
+  - Examples: examples.md
+  - API Overview: api.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/nenuadrian/hades-neural-engine
