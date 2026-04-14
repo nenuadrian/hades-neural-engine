@@ -1,5 +1,7 @@
 # Hades Neural Engine (HNE)
 
+[![docs](https://github.com/nenuadrian/hades-neural-engine/actions/workflows/docs.yml/badge.svg)](https://github.com/nenuadrian/hades-neural-engine/actions/workflows/docs.yml) [![Build and Test](https://github.com/nenuadrian/hades-neural-engine/actions/workflows/build.yml/badge.svg)](https://github.com/nenuadrian/hades-neural-engine/actions/workflows/build.yml)
+
 C++20 reinforcement learning library for training and deploying neural network policies in game engines. An example engine making use of HNE is [Hades](https://github.com/nenuadrian/hades-game-engine), a custom C++ game engine built for research and prototyping.
 
 ## Architecture
