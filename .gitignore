@@ -1,3 +1,5 @@
+.venv-ci/**
+build-ci/**
 build/**
 **/.DS_Store/**
 .DS_Store

@@ -1,0 +1,74 @@
+name: Build and Test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PyTorch
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            python -m pip install torch==2.7.0
+          else
+            python -m pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cpu
+          fi
+
+      - name: Export Torch paths
+        shell: bash
+        run: |
+          echo "TORCH_CMAKE_PREFIX_PATH=$(python -c 'import torch; print(torch.utils.cmake_prefix_path)')" >> "$GITHUB_ENV"
+          echo "TORCH_LIB_DIR=$(python -c \"import os, torch; print(os.path.join(os.path.dirname(torch.__file__), 'lib'))\")" >> "$GITHUB_ENV"
+
+      - name: Configure
+        shell: bash
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DHNE_BUILD_TRAINING=ON
+          -DHNE_BUILD_INFERENCE=ON
+          -DHNE_BUILD_TESTS=ON
+          -DCMAKE_PREFIX_PATH="${TORCH_CMAKE_PREFIX_PATH}"
+
+      - name: Build
+        shell: bash
+        run: cmake --build build --config Release --parallel
+
+      - name: Run tests
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            export PATH="${TORCH_LIB_DIR}:$PATH"
+          elif [ "$RUNNER_OS" = "Linux" ]; then
+            export LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH:-}"
+          else
+            export DYLD_LIBRARY_PATH="${TORCH_LIB_DIR}:${DYLD_LIBRARY_PATH:-}"
+          fi
+
+          ctest --test-dir build --build-config Release --output-on-failure

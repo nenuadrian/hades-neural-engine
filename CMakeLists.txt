@@ -34,6 +34,7 @@ endif()
 # ── hne_core (always built, no LibTorch) ────────────────────────────────────
 
 add_library(hne_core STATIC
+    src/core/environment.cpp
     src/core/types.cpp
 )
 target_include_directories(hne_core PUBLIC

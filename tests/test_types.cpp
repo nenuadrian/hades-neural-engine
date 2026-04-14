@@ -110,7 +110,7 @@ static_assert(Environment<MockEnv>, "MockEnv must satisfy Environment concept");
 
 TEST(EnvironmentTest, MockEnvWorks) {
     MockEnv env;
-    auto obs = env.reset();
+    auto obs = env.reset(-1);
     EXPECT_EQ(obs.numel(), 4);
 
     auto result = env.step(Action::discrete(0));
