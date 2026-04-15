@@ -7,8 +7,9 @@
 
 namespace hne::imgui {
 
-// Render a training config editor. Returns true if the user clicks "Start Training".
-bool render_trainer_config_editor(TrainerConfig& config);
+// Render a training config editor. Edits `config` in place.
+// Lifecycle (start/pause/resume/stop) lives in render_training_controls().
+void render_trainer_config_editor(TrainerConfig& config);
 
 // Render a live metrics dashboard.
 void render_metrics_dashboard(const std::deque<TrainingMetrics>& metrics_history,

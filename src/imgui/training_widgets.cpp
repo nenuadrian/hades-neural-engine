@@ -9,9 +9,7 @@
 
 namespace hne::imgui {
 
-bool render_trainer_config_editor(TrainerConfig& config) {
-    bool start = false;
-
+void render_trainer_config_editor(TrainerConfig& config) {
     if (ImGui::CollapsingHeader("Environment", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::SliderInt("Num Envs", &config.num_envs, 1, 64);
         ImGui::InputInt("Rollout Length", &config.rollout_length, 256, 1024);
@@ -81,12 +79,6 @@ bool render_trainer_config_editor(TrainerConfig& config) {
         config.ppo.target_kl = target_kl;
     }
 
-    ImGui::Separator();
-    if (ImGui::Button("Start Training", ImVec2(-1, 30))) {
-        start = true;
-    }
-
-    return start;
 }
 
 void render_metrics_dashboard(const std::deque<TrainingMetrics>& metrics_history,
