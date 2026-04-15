@@ -8,8 +8,10 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 option(HNE_BUILD_TRAINING "Build training components (requires LibTorch)" OFF)
 option(HNE_BUILD_INFERENCE "Build inference runtime (requires LibTorch CPU)" OFF)
 option(HNE_BUILD_IMGUI_WIDGETS "Build ImGui training widgets (consumer must provide ImGui)" OFF)
+option(HNE_BUILD_WANDB "Build the Weights & Biases callback + panel (requires libcurl)" OFF)
 option(HNE_BUILD_TESTS "Build unit tests" OFF)
 option(HNE_BUILD_EXAMPLES "Build example programs" OFF)
+option(HNE_AUTO_DETECT_TORCH "Auto-detect pip-installed PyTorch via `python -c 'import torch'`" ON)
 
 # ── Dependencies ────────────────────────────────────────────────────────────
 
@@ -27,6 +29,48 @@ endif()
 
 # LibTorch — only when training or inference is enabled
 if(HNE_BUILD_TRAINING OR HNE_BUILD_INFERENCE)
+    # Auto-detect pip-installed PyTorch unless the user already supplied a
+    # Torch_DIR or a CMAKE_PREFIX_PATH that resolves Torch themselves.
+    if(HNE_AUTO_DETECT_TORCH AND NOT Torch_DIR)
+        set(_hne_torch_candidates "")
+
+        # 1. Try the `python` / `python3` on PATH first (picks up active venv / conda env).
+        find_program(_hne_py_path NAMES python3 python)
+        if(_hne_py_path)
+            list(APPEND _hne_torch_candidates "${_hne_py_path}")
+        endif()
+
+        # 2. Fall back to CMake's FindPython3.
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        if(Python3_Interpreter_FOUND)
+            list(APPEND _hne_torch_candidates "${Python3_EXECUTABLE}")
+        endif()
+
+        list(REMOVE_DUPLICATES _hne_torch_candidates)
+
+        foreach(_py IN LISTS _hne_torch_candidates)
+            execute_process(
+                COMMAND "${_py}" -c
+                    "import torch,sys; sys.stdout.write(torch.utils.cmake_prefix_path)"
+                OUTPUT_VARIABLE _hne_torch_prefix
+                RESULT_VARIABLE _hne_torch_rc
+                ERROR_QUIET)
+            if(_hne_torch_rc EQUAL 0 AND _hne_torch_prefix)
+                message(STATUS
+                    "HNE: auto-detected LibTorch via ${_py}: ${_hne_torch_prefix}")
+                list(PREPEND CMAKE_PREFIX_PATH "${_hne_torch_prefix}")
+                break()
+            endif()
+        endforeach()
+
+        if(NOT _hne_torch_prefix)
+            message(STATUS
+                "HNE: no Python with `import torch` found. Pass "
+                "-DCMAKE_PREFIX_PATH=/path/to/libtorch or "
+                "`pip install torch` in the active environment.")
+        endif()
+    endif()
+
     find_package(Torch REQUIRED)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 endif()
@@ -83,6 +127,39 @@ if(HNE_BUILD_IMGUI_WIDGETS)
         target_link_libraries(hne_imgui PUBLIC imgui_lib)
     elseif(TARGET imgui)
         target_link_libraries(hne_imgui PUBLIC imgui)
+    endif()
+endif()
+
+# ── hne_wandb (optional, requires libcurl) ──────────────────────────────────
+
+if(HNE_BUILD_WANDB)
+    if(NOT HNE_BUILD_TRAINING)
+        message(FATAL_ERROR
+            "HNE_BUILD_WANDB requires HNE_BUILD_TRAINING (the callback derives "
+            "from ITrainerCallback).")
+    endif()
+    find_package(CURL REQUIRED)
+
+    set(_hne_wandb_sources
+        src/wandb/client.cpp
+        src/wandb/callback.cpp
+    )
+    if(HNE_BUILD_IMGUI_WIDGETS)
+        list(APPEND _hne_wandb_sources src/imgui/wandb_panel.cpp)
+    endif()
+
+    add_library(hne_wandb STATIC ${_hne_wandb_sources})
+    target_compile_definitions(hne_wandb PUBLIC HNE_WANDB)
+    target_link_libraries(hne_wandb PUBLIC hne_training CURL::libcurl)
+
+    if(HNE_BUILD_IMGUI_WIDGETS)
+        # Same ImGui target lookup pattern as hne_imgui — the consumer is
+        # expected to expose `imgui` or `imgui_lib`.
+        if(TARGET imgui_lib)
+            target_link_libraries(hne_wandb PUBLIC imgui_lib)
+        elseif(TARGET imgui)
+            target_link_libraries(hne_wandb PUBLIC imgui)
+        endif()
     endif()
 endif()
 

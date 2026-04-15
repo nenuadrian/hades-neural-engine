@@ -85,6 +85,12 @@ auto action = agent->act(observation, /*deterministic=*/true);
 Requires LibTorch for training/inference targets. Core library has no LibTorch dependency.
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cpu
+```
+
+```bash
 cmake -B build \
     -DHNE_BUILD_TRAINING=ON \
     -DHNE_BUILD_INFERENCE=ON \
